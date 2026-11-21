@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract zips
+        run: |
+          shopt -s nullglob
+          for z in *-src.zip; do
+            echo "extract $z"
+            unzip -oq "$z"
+          done
+          ls
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+          add-to-path: false
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build every mod
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          mkdir -p out
+          # Build every folder that has xmake.lua + levimod.json (BedrockTools is only a reference).
+          find . -name xmake.lua -not -path "*/BedrockTools*" -not -path "*/.xmake/*" -not -path "*/build/*" | while read -r lua; do
+            dir=$(dirname "$lua")
+            [ -f "$dir/levimod.json" ] || continue
+            echo "::group::build $dir"
+            (
+              cd "$dir"
+              xmake f -p android -a arm64-v8a --ndk="$ANDROID_NDK_HOME" -m release -y
+              xmake -y -vD
+            )
+            echo "::endgroup::"
+          done
+          find . -name "*.levipack" -not -path "./out/*" -exec cp -v {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: levipack
+          path: out/*.levipack
+          if-no-files-found: error
